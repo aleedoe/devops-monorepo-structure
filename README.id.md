@@ -1,8 +1,3 @@
-Tentu, ini adalah terjemahan lengkap dari file `README.md` ke dalam Bahasa Indonesia. Dokumen ini menjelaskan cara kerja monorepo dengan PNPM dan Turborepo, khususnya terkait pembagian kode (sharing code) antar aplikasi.
-
-Silakan simpan konten di bawah ini dengan nama file `README.md`.
-
-```markdown
 # 🏗️ Demo Monorepo PNPM + Turborepo — Validator Bersama
 
 Sebuah monorepo **minimal yang berfungsi penuh** yang mendemonstrasikan cara kerja paket bersama (shared packages) di seluruh **Next.js** dan **Express** menggunakan **PNPM Workspaces** dan **Turborepo**.
