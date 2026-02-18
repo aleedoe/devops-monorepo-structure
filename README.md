@@ -28,25 +28,23 @@ This project exists to **remove confusion** about:
 
 ### Architecture
 
-```
-┌───────────────────────────────────────────────────┐
-│                  MONOREPO ROOT                     │
-│                                                    │
-│  ┌─────────────────┐    ┌─────────────────────┐   │
-│  │   apps/web       │    │   apps/api           │   │
-│  │   (Next.js)      │    │   (Express)          │   │
-│  │   Port 3000      │    │   Port 3001          │   │
-│  └────────┬─────────┘    └────────┬─────────────┘   │
-│           │                       │                  │
-│           │    ┌──────────────┐   │                  │
-│           └───►│  packages/   │◄──┘                  │
-│                │  validators  │                      │
-│                │  (Zod)       │                      │
-│                └──────────────┘                      │
-│                                                      │
-│  📦 pnpm-workspace.yaml    (defines workspace)      │
-│  ⚡ turbo.json              (orchestrates tasks)     │
-└──────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    subgraph MONOREPO_ROOT["🏗️ MONOREPO ROOT"]
+        WEB["📁 apps/web<br/><i>Next.js — Port 3000</i>"]
+        API["📁 apps/api<br/><i>Express — Port 3001</i>"]
+        VAL["📦 packages/validators<br/><i>Zod Schemas</i>"]
+        CONFIG["� pnpm-workspace.yaml + ⚡ turbo.json"]
+    end
+
+    WEB -->|imports| VAL
+    API -->|imports| VAL
+
+    style WEB fill:#3b82f6,stroke:#1e40af,color:#fff
+    style API fill:#f97316,stroke:#c2410c,color:#fff
+    style VAL fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style CONFIG fill:#64748b,stroke:#475569,color:#fff
+    style MONOREPO_ROOT fill:#0f172a,stroke:#334155,color:#e2e8f0
 ```
 
 ### Tech Stack
@@ -63,33 +61,23 @@ This project exists to **remove confusion** about:
 
 ### The Core Idea
 
-```
-                ┌─────────────────────────────┐
-                │     @repo/validators        │
-                │                             │
-                │   userSchema = z.object({   │
-                │     name: z.string(),       │
-                │     email: z.string(),      │
-                │     age: z.number(),        │
-                │   })                        │
-                └──────────┬──────────────────┘
-                           │
-              ┌────────────┴────────────┐
-              │                         │
-     ┌────────▼────────┐     ┌──────────▼──────────┐
-     │  apps/web        │     │  apps/api            │
-     │                  │     │                      │
-     │  import {        │     │  import {            │
-     │    userSchema    │     │    userSchema        │
-     │  } from          │     │  } from              │
-     │  "@repo/         │     │  "@repo/             │
-     │   validators"    │     │   validators"        │
-     └──────────────────┘     └──────────────────────┘
+```mermaid
+graph TD
+    SCHEMA["📦 @repo/validators<br/><br/><code>userSchema = z.object &#123;<br/>  name: z.string&#40;&#41;,<br/>  email: z.string&#40;&#41;,<br/>  age: z.number&#40;&#41;<br/>&#125;</code>"]
 
-          SAME import            SAME import
-          SAME schema            SAME schema
-          ✅ Zero duplication    ✅ Always in sync
+    WEB["🌐 apps/web<br/><br/><code>import &#123; userSchema &#125;<br/>from @repo/validators</code><br/><br/>✅ SAME import<br/>✅ SAME schema"]
+
+    API["🔥 apps/api<br/><br/><code>import &#123; userSchema &#125;<br/>from @repo/validators</code><br/><br/>✅ SAME import<br/>✅ SAME schema"]
+
+    SCHEMA --> WEB
+    SCHEMA --> API
+
+    style SCHEMA fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style WEB fill:#3b82f6,stroke:#1e40af,color:#fff
+    style API fill:#f97316,stroke:#c2410c,color:#fff
 ```
+
+> **✅ Zero duplication — ✅ Always in sync**
 
 ---
 
@@ -548,22 +536,14 @@ This means:
 - That folder is actually a **shortcut** pointing to `packages/validators/`
 - So it reads the files from `packages/validators/dist/`
 
-```
-┌──────────────────────────────┐
-│  import from "@repo/validators"
-└─────────────┬────────────────┘
-              │
-              ▼
-┌──────────────────────────────┐
-│  node_modules/@repo/validators
-│  (this is a SYMLINK)
-└─────────────┬────────────────┘
-              │ points to
-              ▼
-┌──────────────────────────────┐
-│  packages/validators/
-│  (the actual code)
-└──────────────────────────────┘
+```mermaid
+flowchart TD
+    A["import from <b>@repo/validators</b>"] --> B["node_modules/@repo/validators<br/><i>— this is a SYMLINK</i>"]
+    B -->|"points to"| C["packages/validators/<br/><i>— the actual code</i>"]
+
+    style A fill:#3b82f6,stroke:#1e40af,color:#fff
+    style B fill:#eab308,stroke:#a16207,color:#000
+    style C fill:#22c55e,stroke:#15803d,color:#fff
 ```
 
 ### How Node Module Resolution Works
@@ -597,26 +577,18 @@ This can happen when:
 
 ### What Happens During `next build`
 
-```
-pnpm build
-  │
-  ├─→  1. Turborepo reads turbo.json
-  │       Sees build.dependsOn: ["^build"]
-  │       Determines: validators must build FIRST
-  │
-  ├─→  2. packages/validators: tsup runs
-  │       Input:  src/index.ts + src/user.schema.ts
-  │       Output: dist/index.js, dist/index.mjs, dist/index.d.ts
-  │
-  ├─→  3. apps/api: tsc runs
-  │       Imports @repo/validators from dist/
-  │       Output: dist/ (compiled JS)
-  │
-  └─→  4. apps/web: next build runs
-          Sees transpilePackages: ["@repo/validators"]
-          Follows symlink to packages/validators/
-          Bundles the validator code INTO the Next.js build
-          Output: .next/ (fully self-contained)
+```mermaid
+flowchart TD
+    BUILD["⚡ pnpm build"] --> TURBO["1️⃣ Turborepo reads turbo.json<br/><i>dependsOn: '^build'</i><br/>validators must build FIRST"]
+    TURBO --> VAL["2️⃣ packages/validators — tsup<br/><b>Input:</b> src/index.ts + user.schema.ts<br/><b>Output:</b> dist/index.js, .mjs, .d.ts"]
+    VAL --> API["3️⃣ apps/api — tsc<br/>Imports @repo/validators from dist/<br/><b>Output:</b> dist/ compiled JS"]
+    VAL --> WEB["4️⃣ apps/web — next build<br/>transpilePackages: @repo/validators<br/>Bundles validator code INTO .next/<br/><b>Output:</b> .next/ fully self-contained"]
+
+    style BUILD fill:#0f172a,stroke:#334155,color:#e2e8f0
+    style TURBO fill:#64748b,stroke:#475569,color:#fff
+    style VAL fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style API fill:#f97316,stroke:#c2410c,color:#fff
+    style WEB fill:#3b82f6,stroke:#1e40af,color:#fff
 ```
 
 ### Why Importing Outside Web Root Works
@@ -631,15 +603,25 @@ People often worry: _"The validators package is in `packages/validators/`, which
 
 3. **During deployment:** You deploy the `.next/` folder. It doesn't care where the source code came from — everything it needs is already bundled inside.
 
-```
-BEFORE BUILD:                      AFTER BUILD:
+```mermaid
+flowchart LR
+    subgraph BEFORE["📂 BEFORE BUILD"]
+        V["packages/validators/src/"]
+        W["apps/web/src/"]
+    end
 
-packages/validators/src/ ──┐       apps/web/.next/
-                           │          └── (validator code is
-apps/web/src/ ─────────────┤               BUNDLED INSIDE here)
-                           │
-                           └──→    No external dependencies!
-                                   Fully self-contained! ✅
+    subgraph AFTER["📦 AFTER BUILD"]
+        NEXT[".next/<br/><i>validator code is<br/>BUNDLED INSIDE here</i><br/><br/>No external dependencies!<br/>Fully self-contained! ✅"]
+    end
+
+    V --> NEXT
+    W --> NEXT
+
+    style V fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style W fill:#3b82f6,stroke:#1e40af,color:#fff
+    style NEXT fill:#22c55e,stroke:#15803d,color:#fff
+    style BEFORE fill:#1e293b,stroke:#334155,color:#e2e8f0
+    style AFTER fill:#14532d,stroke:#166534,color:#e2e8f0
 ```
 
 ### Why This Does NOT Break Deployment
