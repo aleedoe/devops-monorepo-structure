@@ -1,3 +1,8 @@
+Tentu, ini adalah terjemahan lengkap dari file `README.md` ke dalam Bahasa Indonesia. Dokumen ini menjelaskan cara kerja monorepo dengan PNPM dan Turborepo, khususnya terkait pembagian kode (sharing code) antar aplikasi.
+
+Silakan simpan konten di bawah ini dengan nama file `README.md`.
+
+```markdown
 # 🏗️ Demo Monorepo PNPM + Turborepo — Validator Bersama
 
 Sebuah monorepo **minimal yang berfungsi penuh** yang mendemonstrasikan cara kerja paket bersama (shared packages) di seluruh **Next.js** dan **Express** menggunakan **PNPM Workspaces** dan **Turborepo**.
@@ -28,34 +33,30 @@ Proyek ini dibuat untuk **menghilangkan kebingungan** tentang:
 
 ### Arsitektur
 
+```mermaid
+graph TD
+    subgraph MONOREPO_ROOT["🏗️ MONOREPO ROOT"]
+        WEB["📁 apps/web<br/><i>Next.js — Port 3000</i>"]
+        API["📁 apps/api<br/><i>Express — Port 3001</i>"]
+        VAL["📦 packages/validators<br/><i>Skema Zod</i>"]
+        CONFIG["📄 pnpm-workspace.yaml + ⚡ turbo.json"]
+    end
 
-```
+    WEB -->|mengimpor| VAL
+    API -->|mengimpor| VAL
 
-┌───────────────────────────────────────────────────┐
-│                  MONOREPO ROOT                     │
-│                                                    │
-│  ┌─────────────────┐    ┌─────────────────────┐   │
-│  │   apps/web       │    │   apps/api           │   │
-│  │   (Next.js)      │    │   (Express)          │   │
-│  │   Port 3000      │    │   Port 3001          │   │
-│  └────────┬─────────┘    └────────┬─────────────┘   │
-│           │                       │                  │
-│           │    ┌──────────────┐   │                  │
-│           └───►│  packages/   │◄──┘                  │
-│                │  validators  │                      │
-│                │  (Zod)       │                      │
-│                └──────────────┘                      │
-│                                                      │
-│  📦 pnpm-workspace.yaml    (mendefinisikan workspace)│
-│  ⚡ turbo.json              (mengatur tugas/tasks)   │
-└──────────────────────────────────────────────────────┘
+    style WEB fill:#3b82f6,stroke:#1e40af,color:#fff
+    style API fill:#f97316,stroke:#c2410c,color:#fff
+    style VAL fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style CONFIG fill:#64748b,stroke:#475569,color:#fff
+    style MONOREPO_ROOT fill:#0f172a,stroke:#334155,color:#e2e8f0
 
 ```
 
 ### Tech Stack
 
 | Lapisan | Teknologi |
-| :--- | :--- |
+| --- | --- |
 | Package Manager | PNPM (Workspaces) |
 | Monorepo Tool | Turborepo |
 | Web App | Next.js 15 (App Router) |
@@ -66,39 +67,24 @@ Proyek ini dibuat untuk **menghilangkan kebingungan** tentang:
 
 ### Ide Inti
 
+```mermaid
+graph TD
+    SCHEMA["📦 @repo/validators<br/><br/><code>userSchema = z.object &#123;<br/>  name: z.string&#40;&#41;,<br/>  email: z.string&#40;&#41;,<br/>  age: z.number&#40;&#41;<br/>&#125;</code>"]
+
+    WEB["🌐 apps/web<br/><br/><code>import &#123; userSchema &#125;<br/>from @repo/validators</code><br/><br/>✅ Impor yang SAMA<br/>✅ Skema yang SAMA"]
+
+    API["🔥 apps/api<br/><br/><code>import &#123; userSchema &#125;<br/>from @repo/validators</code><br/><br/>✅ Impor yang SAMA<br/>✅ Skema yang SAMA"]
+
+    SCHEMA --> WEB
+    SCHEMA --> API
+
+    style SCHEMA fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style WEB fill:#3b82f6,stroke:#1e40af,color:#fff
+    style API fill:#f97316,stroke:#c2410c,color:#fff
 
 ```
 
-```
-            ┌─────────────────────────────┐
-            │     @repo/validators        │
-            │                             │
-            │   userSchema = z.object({   │
-            │     name: z.string(),       │
-            │     email: z.string(),      │
-            │     age: z.number(),        │
-            │   })                        │
-            └──────────┬──────────────────┘
-                       │
-          ┌────────────┴────────────┐
-          │                         │
- ┌────────▼────────┐     ┌──────────▼──────────┐
- │  apps/web        │     │  apps/api            │
- │                  │     │                      │
- │  import {        │     │  import {            │
- │    userSchema    │     │    userSchema        │
- │  } from          │     │  } from              │
- │  "@repo/         │     │  "@repo/             │
- │   validators"    │     │   validators"        │
- └──────────────────┘     └──────────────────────┘
-
-      Impor yang SAMA        Impor yang SAMA
-      Skema yang SAMA        Skema yang SAMA
-      ✅ Nol duplikasi       ✅ Selalu sinkron
-
-```
-
-```
+> **✅ Nol duplikasi — ✅ Selalu sinkron**
 
 ---
 
@@ -108,8 +94,8 @@ Proyek ini dibuat untuk **menghilangkan kebingungan** tentang:
 
 Pastikan Anda telah menginstal:
 
-- **Node.js** v18+ → [nodejs.org](https://nodejs.org)
-- **PNPM** v9+ → `npm install -g pnpm`
+* **Node.js** v18+ → [nodejs.org](https://nodejs.org)
+* **PNPM** v9+ → `npm install -g pnpm`
 
 ### Langkah 1: Buat Folder Root
 
@@ -373,7 +359,7 @@ Ini adalah cara PNPM mengetahui di mana menemukan paket workspace. Tanpa ini, re
 
 | Kunci | Tujuan |
 | --- | --- |
-| `private: true` | Mencegah publikasi root ke npm |
+| `private: true` | Mencegah publikasi paket root ke npm |
 | `scripts` | Mendelegasikan semuanya ke Turborepo |
 | `devDependencies` | Hanya alat tingkat monorepo (turbo, typescript) |
 | `packageManager` | Memastikan semua orang menggunakan versi PNPM yang sama |
@@ -576,22 +562,14 @@ Ini berarti:
 * Folder itu sebenarnya adalah **shortcut** yang menunjuk ke `packages/validators/`
 * Jadi ia membaca file dari `packages/validators/dist/`
 
-```
-┌──────────────────────────────┐
-│  import from "@repo/validators"
-└─────────────┬────────────────┘
-              │
-              ▼
-┌──────────────────────────────┐
-│  node_modules/@repo/validators
-│  (ini adalah SYMLINK)
-└─────────────┬────────────────┘
-              │ menunjuk ke
-              ▼
-┌──────────────────────────────┐
-│  packages/validators/
-│  (kode sebenarnya)
-└──────────────────────────────┘
+```mermaid
+flowchart TD
+    A["import dari <b>@repo/validators</b>"] --> B["node_modules/@repo/validators<br/><i>— ini adalah SYMLINK</i>"]
+    B -->|"menunjuk ke"| C["packages/validators/<br/><i>— kode sebenarnya</i>"]
+
+    style A fill:#3b82f6,stroke:#1e40af,color:#fff
+    style B fill:#eab308,stroke:#a16207,color:#000
+    style C fill:#22c55e,stroke:#15803d,color:#fff
 
 ```
 
@@ -626,26 +604,18 @@ Ini bisa terjadi ketika:
 
 ### Apa yang Terjadi Selama `next build`
 
-```
-pnpm build
-  │
-  ├─→  1. Turborepo membaca turbo.json
-  │       Melihat build.dependsOn: ["^build"]
-  │       Menentukan: validators harus dibangun PERTAMA
-  │
-  ├─→  2. packages/validators: tsup berjalan
-  │       Input:  src/index.ts + src/user.schema.ts
-  │       Output: dist/index.js, dist/index.mjs, dist/index.d.ts
-  │
-  ├─→  3. apps/api: tsc berjalan
-  │       Mengimpor @repo/validators dari dist/
-  │       Output: dist/ (JS terkompilasi)
-  │
-  └─→  4. apps/web: next build berjalan
-          Melihat transpilePackages: ["@repo/validators"]
-          Mengikuti symlink ke packages/validators/
-          Membundel kode validator KE DALAM build Next.js
-          Output: .next/ (sepenuhnya mandiri)
+```mermaid
+flowchart TD
+    BUILD["⚡ pnpm build"] --> TURBO["1️⃣ Turborepo membaca turbo.json<br/><i>dependsOn: '^build'</i><br/>validators harus dibangun PERTAMA"]
+    TURBO --> VAL["2️⃣ packages/validators — tsup<br/><b>Input:</b> src/index.ts + user.schema.ts<br/><b>Output:</b> dist/index.js, .mjs, .d.ts"]
+    VAL --> API["3️⃣ apps/api — tsc<br/>Mengimpor @repo/validators dari dist/<br/><b>Output:</b> dist/ JS terkompilasi"]
+    VAL --> WEB["4️⃣ apps/web — next build<br/>transpilePackages: @repo/validators<br/>Membundel kode validator KE DALAM .next/<br/><b>Output:</b> .next/ sepenuhnya mandiri"]
+
+    style BUILD fill:#0f172a,stroke:#334155,color:#e2e8f0
+    style TURBO fill:#64748b,stroke:#475569,color:#fff
+    style VAL fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style API fill:#f97316,stroke:#c2410c,color:#fff
+    style WEB fill:#3b82f6,stroke:#1e40af,color:#fff
 
 ```
 
@@ -659,15 +629,25 @@ Orang sering khawatir: *"Paket validators ada di `packages/validators/`, yang be
 2. **Selama build:** Next.js membundel **semuanya** ke dalam folder `.next/`. Kode validator yang dikompilasi **disalin ke dalam** bundle tersebut. Output `.next/` akhir benar-benar mandiri (self-contained).
 3. **Selama deployment:** Anda men-deploy folder `.next/`. Folder ini tidak peduli dari mana kode sumber berasal — semua yang dibutuhkannya sudah dibundel di dalamnya.
 
-```
-SEBELUM BUILD:                     SETELAH BUILD:
+```mermaid
+flowchart LR
+    subgraph BEFORE["📂 SEBELUM BUILD"]
+        V["packages/validators/src/"]
+        W["apps/web/src/"]
+    end
 
-packages/validators/src/ ──┐       apps/web/.next/
-                           │          └── (kode validator sudah
-apps/web/src/ ─────────────┤               DIBUNDEL DI DALAM sini)
-                           │
-                           └──→    Tidak ada dependensi eksternal!
-                                   Sepenuhnya mandiri! ✅
+    subgraph AFTER["📦 SETELAH BUILD"]
+        NEXT[".next/<br/><i>kode validator sudah<br/>DIBUNDEL DI DALAM sini</i><br/><br/>Tidak ada dependensi eksternal!<br/>Sepenuhnya mandiri! ✅"]
+    end
+
+    V --> NEXT
+    W --> NEXT
+
+    style V fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style W fill:#3b82f6,stroke:#1e40af,color:#fff
+    style NEXT fill:#22c55e,stroke:#15803d,color:#fff
+    style BEFORE fill:#1e293b,stroke:#334155,color:#e2e8f0
+    style AFTER fill:#14532d,stroke:#166534,color:#e2e8f0
 
 ```
 
