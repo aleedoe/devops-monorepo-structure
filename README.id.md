@@ -21,6 +21,8 @@ Proyek ini dibuat untuk **menghilangkan kebingungan** tentang:
 5. [Panduan Kode Sumber](#5-panduan-kode-sumber)
 6. [Memahami node_modules & Symlink](#6-memahami-node_modules--symlink)
 7. [Memahami Perilaku Deployment](#7-memahami-perilaku-deployment)
+8. [Konfigurasi Docker & Menjalankan Secara Lokal](#8-konfigurasi-docker--menjalankan-secara-lokal)
+9. [Pipeline CI/CD (GitHub Actions)](#9-pipeline-cicd-github-actions)
 
 ---
 
@@ -268,10 +270,12 @@ Setelah menyelesaikan semua langkah, proyek Anda akan terlihat seperti ini:
 devops-monorepo-structure/
 ├── 📄 .gitignore
 ├── 📄 .npmrc                          # Konfigurasi PNPM
+├── 📄 .dockerignore                   # File yang dikecualikan dari konteks Docker
 ├── 📄 package.json                    # Root — hanya scripts + devDeps
 ├── 📄 pnpm-workspace.yaml             # Mendefinisikan paket workspace
 ├── 📄 turbo.json                      # Pipeline tugas Turborepo
 ├── 📄 tsconfig.json                   # Konfigurasi dasar TypeScript
+├── 📄 docker-compose.yml              # Mengorkestrasi nginx + web + api
 ├── 📄 README.md
 │
 ├── 📦 node_modules/                   # ← SEMUA deps dinaikkan (hoisted) ke sini
@@ -283,16 +287,29 @@ devops-monorepo-structure/
 │   ├── zod/
 │   └── ... (setiap dependensi)
 │
+├── 📁 .github/
+│   └── 📁 workflows/
+│       └── 📄 deploy.yml              # CI/CD: Lint → Build → Deploy
+│
+├── 📁 nginx/                          # Konfigurasi Reverse proxy
+│   ├── 📄 Dockerfile                  # nginx:alpine dengan config kustom
+│   └── 📄 nginx.conf                  # Merutekan trafik /api/* dan /*
+│
+├── 📁 scripts/
+│   └── 📄 deploy.sh                   # Script deploy VPS mandiri
+│
 ├── 📁 apps/
 │   ├── 📁 api/                        # Server API Express
+│   │   ├── 📄 Dockerfile              # Build multi-stage (turbo prune)
 │   │   ├── 📄 package.json
 │   │   ├── 📄 tsconfig.json
 │   │   └── 📁 src/
 │   │       └── 📄 index.ts            # Endpoint POST /users
 │   │
 │   └── 📁 web/                        # Web App Next.js
+│       ├── 📄 Dockerfile              # Build multi-stage (turbo prune)
 │       ├── 📄 package.json
-│       ├── 📄 next.config.js          # Konfigurasi transpilePackages
+│       ├── 📄 next.config.js          # transpilePackages + standalone
 │       ├── 📄 tsconfig.json
 │       └── 📁 src/
 │           └── 📁 app/
@@ -354,7 +371,7 @@ Ini adalah cara PNPM mengetahui di mana menemukan paket workspace. Tanpa ini, re
 
 | Kunci | Tujuan |
 | --- | --- |
-| `private: true` | Mencegah publikasi paket root ke npm |
+| `private: true` | Mencegah publikasi root ke npm |
 | `scripts` | Mendelegasikan semuanya ke Turborepo |
 | `devDependencies` | Hanya alat tingkat monorepo (turbo, typescript) |
 | `packageManager` | Memastikan semua orang menggunakan versi PNPM yang sama |
@@ -466,7 +483,7 @@ app.post("/users", (req, res) => {
 
 ```
 
-**Tes itu:**
+**Tes API tersebut:**
 
 ```bash
 # Permintaan valid
@@ -541,7 +558,7 @@ devops-monorepo-structure/
 
 ### Apa itu Symlink?
 
-**Symlink** (symbolic link) seperti **shortcut (jalan pintas)** di komputer Anda.
+**Symlink** (symbolic link / tautan simbolik) seperti **shortcut (jalan pintas)** di komputer Anda.
 
 Saat Anda menjalankan `pnpm install`, PNPM membuat symlink ini:
 
@@ -587,7 +604,7 @@ Ini adalah resolusi modul standar Node.js — alat monorepo hanya memanfaatkanny
 
 Ini bisa terjadi ketika:
 
-* Sebuah paket membutuhkan **versi yang berbeda** dari apa yang di-hoist di root
+* Sebuah paket membutuhkan **versi yang berbeda** dari apa yang dinaikkan (hoisted) di root
 * Mode isolasi ketat PNPM membuat direktori `.pnpm`
 * Next.js menghasilkan cache-nya sendiri di dalam `node_modules/.cache`
 
@@ -667,7 +684,218 @@ Vercel akan menginstal semua dependensi, membangun validators terlebih dahulu (m
 
 ---
 
+## 8. Konfigurasi Docker & Menjalankan Secara Lokal
+
+Monorepo ini sepenuhnya dikontainerisasi dengan **Docker Compose**. Satu perintah menjalankan seluruh stack: sebuah **Nginx reverse proxy**, **frontend Next.js**, dan **API Express** — semuanya pada jaringan internal yang terisolasi.
+
+### Memulai Stack
+
+```bash
+# Bangun dan jalankan semuanya (saat pertama kali)
+docker compose up --build
+
+# Atau jalankan dalam mode detached (di background)
+docker compose up --build -d
+
+```
+
+Itu saja. Kunjungi:
+
+* 🌐 **Frontend:** `http://localhost/`
+* 🔥 **API:** `http://localhost/api/`
+
+> **🔑 Kunci Pemahaman:** Anda tidak pernah mengakses aplikasi dari port individu mereka (3000, 3001) di produksi. Semua trafik melalui Nginx pada port 80, yang merutekannya secara internal.
+
+### Arsitektur Jaringan
+
+```mermaid
+graph TB
+    CLIENT["🌍 Browser / Client"] -->|":80"| NGINX
+
+    subgraph HOST["🖥️ Mesin Host"]
+        subgraph DOCKER["🐳 Docker — app-network (bridge terisolasi)"]
+            NGINX["📡 Nginx<br/><i>Reverse Proxy</i><br/>Port 80 (diekspos)"]
+            WEB["🌐 Next.js<br/><i>apps/web</i><br/>Port 3000 (hanya internal)"]
+            API["🔥 Express<br/><i>apps/api</i><br/>Port 3001 (hanya internal)"]
+        end
+    end
+
+    NGINX -->|"/* → web:3000"| WEB
+    NGINX -->|"/api/* → api:3001<br/>(menghapus awalan /api)"| API
+
+    style CLIENT fill:#64748b,stroke:#475569,color:#fff
+    style NGINX fill:#22c55e,stroke:#15803d,color:#fff
+    style WEB fill:#3b82f6,stroke:#1e40af,color:#fff
+    style API fill:#f97316,stroke:#c2410c,color:#fff
+    style DOCKER fill:#0f172a,stroke:#334155,color:#e2e8f0
+    style HOST fill:#1e293b,stroke:#334155,color:#e2e8f0
+
+```
+
+| Properti | Nginx | Next.js (web) | Express (api) |
+| --- | --- | --- | --- |
+| **Diekspos ke host?** | ✅ Ya (port 80) | ❌ Tidak | ❌ Tidak |
+| **Dapat diakses dari browser?** | ✅ Langsung | 🔒 Hanya via Nginx | 🔒 Hanya via Nginx |
+| **Port internal** | 80 | 3000 | 3001 |
+| **Health check** | `/nginx-health` | `wget :3000/` | `wget :3001/` |
+
+### Bagaimana Multi-Stage Docker Build Bekerja
+
+Membangun aplikasi monorepo itu rumit — Anda tidak bisa hanya menggunakan `COPY . .` karena itu akan menyertakan kode sumber `apps/api` ke dalam image `apps/web`. Solusinya: **`turbo prune`**.
+
+```mermaid
+flowchart TD
+    subgraph FULL["📂 Monorepo Penuh (~500MB)"]
+        F_WEB["apps/web/"]
+        F_API["apps/api/"]
+        F_VAL["packages/validators/"]
+        F_LOCK["pnpm-lock.yaml"]
+        F_NODE["node_modules/"]
+    end
+
+    PRUNE["⚡ turbo prune @repo/web --docker"]
+
+    subgraph PRUNED["✂️ Output yang Dipangkas (minimal)"]
+        P_JSON["out/json/<br/><i>file package.json +<br/>lockfile yang dipangkas saja</i>"]
+        P_FULL["out/full/<br/><i>Hanya kode sumber<br/>apps/web/ +<br/>packages/validators/</i>"]
+    end
+
+    FULL --> PRUNE --> PRUNED
+
+    style FULL fill:#1e293b,stroke:#334155,color:#e2e8f0
+    style PRUNED fill:#14532d,stroke:#166534,color:#e2e8f0
+    style PRUNE fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style F_WEB fill:#3b82f6,stroke:#1e40af,color:#fff
+    style F_API fill:#ef4444,stroke:#b91c1c,color:#fff
+    style F_VAL fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style F_LOCK fill:#64748b,stroke:#475569,color:#fff
+    style F_NODE fill:#64748b,stroke:#475569,color:#fff
+    style P_JSON fill:#22c55e,stroke:#15803d,color:#fff
+    style P_FULL fill:#22c55e,stroke:#15803d,color:#fff
+
+```
+
+> **Perhatikan:** `apps/api/` **dikecualikan** dari output yang dipangkas saat membangun image `web`. Setiap aplikasi hanya mendapatkan apa yang dibutuhkannya.
+
+Setiap Dockerfile memiliki **4 tahapan (stages)**:
+
+| Tahap | Apa yang dilakukannya | Mengapa |
+| --- | --- | --- |
+| **1. Pruner (Pemangkas)** | Menjalankan `turbo prune @repo/web --docker` | Mengekstrak hanya aplikasi target + dependensi bersamanya |
+| **2. Installer (Penginstal)** | Menyalin file `package.json` yang dipangkas + lockfile, menjalankan `pnpm install` | Layer dependensi di-cache oleh Docker — hanya berjalan ulang ketika lockfile berubah |
+| **3. Builder (Pembangun)** | Menyalin kode sumber yang dipangkas, menjalankan `pnpm turbo run build` | Mengkompilasi TypeScript dan membundel aplikasi |
+| **4. Runner (Pelari)** | Menyalin hanya output yang telah dikompilasi ke dalam image `node:22-alpine` yang bersih | Image akhir bersifat minimal (~50MB) dan berjalan sebagai pengguna non-root |
+
+**Mengapa ini penting:**
+
+* Mengubah kode di `apps/api` **TIDAK** membatalkan cache Docker untuk `apps/web`
+* Image akhir tidak mengandung kode sumber, dev dependencies, atau aplikasi lain
+* Setiap image berjalan sebagai pengguna non-root (`nextjs` / `expressjs`) untuk keamanan
+
+### Apa yang Dilakukan Nginx
+
+Reverse proxy `nginx/nginx.conf` menangani:
+
+| Fitur | Detail |
+| --- | --- |
+| **Routing** | `/api/*` → Express (menghapus awalan `/api`), `/*` → Next.js |
+| **Kompresi Gzip** | Mengkompresi respons teks, JSON, CSS, JS, SVG |
+| **Caching aset statis** | `/_next/static/*` di-cache selama 1 tahun (nama file di-hash sesuai konten) |
+| **Caching HTML** | `no-cache` — selalu menyajikan halaman yang baru/fresh |
+| **Header Keamanan** | `X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy` |
+| **Rate limiting (Pembatasan laju)** | 10 request/detik per IP pada endpoint `/api/*` (burst hingga 20) |
+
+---
+
+## 9. Pipeline CI/CD (GitHub Actions)
+
+Proyek ini mencakup pipeline yang sepenuhnya otomatis yang berjalan pada setiap push ke `main` dan setiap pull request.
+
+### Apa yang Terjadi Kapan
+
+```mermaid
+flowchart TD
+    subgraph TRIGGER["🔔 Pemicu (Trigger)"]
+        PR["Pull Request ke main"]
+        PUSH["Push ke main"]
+    end
+
+    LINT["🔍 Job 1: Lint & Type Check<br/><br/><code>pnpm turbo run lint</code><br/><code>pnpm turbo run typecheck</code><br/><br/>Berjalan di SEMUA workspace"]
+
+    BUILD["🐳 Job 2: Build & Push<br/><br/>Bangun image Docker<br/>Tag dengan SHA pendek + latest<br/>Push ke Docker Hub"]
+
+    DEPLOY["🚀 Job 3: Deploy<br/><br/>SCP docker-compose.yml ke VPS<br/>SSH → docker compose up -d<br/>Verifikasi health check"]
+
+    PR --> LINT
+    PUSH --> LINT --> BUILD --> DEPLOY
+
+    style PR fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style PUSH fill:#22c55e,stroke:#15803d,color:#fff
+    style LINT fill:#3b82f6,stroke:#1e40af,color:#fff
+    style BUILD fill:#f97316,stroke:#c2410c,color:#fff
+    style DEPLOY fill:#ef4444,stroke:#b91c1c,color:#fff
+    style TRIGGER fill:#1e293b,stroke:#334155,color:#e2e8f0
+
+```
+
+| Event | Job 1: Lint & Typecheck | Job 2: Build & Push | Job 3: Deploy |
+| --- | --- | --- | --- |
+| **Pull Request** | ✅ Berjalan | ❌ Dilewati (Skipped) | ❌ Dilewati (Skipped) |
+| **Push ke main** | ✅ Berjalan | ✅ Berjalan (setelah Job 1 lulus) | ✅ Berjalan (setelah Job 2 lulus) |
+
+**Mengapa?** Pull request hanya membutuhkan pemeriksaan kualitas kode. Membangun dan men-deploy hanya boleh terjadi ketika kode benar-benar di-merge (digabungkan) ke `main`.
+
+### Strategi Tagging Image
+
+Setiap build menghasilkan image Docker yang di-tag dengan:
+
+* **SHA Pendek** (misalnya, `abc1234`) — dapat dilacak ke commit yang tepat
+* **`latest`** — selalu menunjuk ke build paling terbaru
+
+```
+yourusername/monorepo-web:abc1234
+yourusername/monorepo-web:latest
+yourusername/monorepo-api:abc1234
+yourusername/monorepo-api:latest
+
+```
+
+### GitHub Secrets yang Diperlukan
+
+Konfigurasikan ini di pengaturan repositori GitHub Anda di bawah **Settings → Secrets and variables → Actions**:
+
+| Secret | Deskripsi | Contoh |
+| --- | --- | --- |
+| `DOCKERHUB_USERNAME` | Username Docker Hub | `yourusername` |
+| `DOCKERHUB_TOKEN` | Token akses Docker Hub | *(hasilkan di hub.docker.com)* |
+| `VPS_HOST` | Alamat IP atau hostname VPS | `203.0.113.10` |
+| `VPS_USERNAME` | Pengguna SSH di VPS | `deploy` |
+| `VPS_SSH_KEY` | Konten kunci privat SSH penuh | *(tempel seluruh kunci)* |
+| `VPS_PORT` | Port SSH | `22` |
+
+### Alur Deployment
+
+Setelah image di-push ke Docker Hub, pipeline:
+
+1. **Menyalin** `docker-compose.yml` ke VPS melalui SCP
+2. **Melakukan SSH** ke server dan men-pull (menarik) image baru
+3. **Menjalankan `docker compose up -d**` — Docker menggantikan kontainer lama dengan yang baru
+4. **Memverifikasi** health check (pemeriksaan kesehatan) lulus
+5. **Memangkas (Prune)** image lama yang menggantung untuk menghemat ruang disk
+
+> **💡 Tip:** Script `scripts/deploy.sh` juga dapat dijalankan secara manual di server mana pun untuk efek yang sama:
+> ```bash
+> ./scripts/deploy.sh yourusername abc1234
+> 
+> ```
+> 
+> 
+
+---
+
 ## Referensi Cepat
+
+### Perintah Pengembangan (Development Commands)
 
 ```bash
 # Instal semua dependensi (selalu dari root!)
@@ -687,6 +915,35 @@ pnpm add axios --filter=@repo/api
 
 # Tambahkan dev dependency bersama ke root
 pnpm add -D prettier -w
+
+```
+
+### Perintah Docker
+
+```bash
+# Bangun dan mulai seluruh stack (nginx + web + api)
+docker compose up --build
+
+# Mulai dalam mode detached (di background)
+docker compose up --build -d
+
+# Hentikan semua kontainer
+docker compose down
+
+# Lihat log untuk semua service
+docker compose logs -f
+
+# Lihat log untuk service tertentu
+docker compose logs -f api
+
+# Bangun ulang tanpa cache Docker (opsi nuklir)
+docker compose build --no-cache
+
+# Periksa status kesehatan (health status) kontainer
+docker compose ps
+
+# Restart satu service saja
+docker compose restart web
 
 ```
 
