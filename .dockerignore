@@ -1,0 +1,31 @@
+# ── Dependencies (installed inside Docker) ────────────────────────────────
+node_modules/
+
+# ── Build outputs (rebuilt inside Docker) ─────────────────────────────────
+dist/
+.next/
+out/
+
+# ── Version control ──────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Turbo cache ──────────────────────────────────────────────────────────
+.turbo/
+
+# ── IDE ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ── Environment files (secrets should not be in images) ──────────────────
+.env
+.env.*
+!.env.example
+
+# ── Documentation ────────────────────────────────────────────────────────
+*.md
+LICENSE
+
+# ── OS files ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db

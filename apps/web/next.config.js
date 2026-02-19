@@ -11,6 +11,15 @@ const nextConfig = {
   // │  that lives outside of apps/web/.                     │
   // └──────────────────────────────────────────────────────┘
   transpilePackages: ["@repo/validators"],
+
+  // ┌──────────────────────────────────────────────────────┐
+  // │  STANDALONE OUTPUT FOR DOCKER DEPLOYMENT             │
+  // │                                                       │
+  // │  Creates a self-contained build output that includes  │
+  // │  only the necessary files (server.js + dependencies), │
+  // │  reducing the image from ~200MB to ~15MB.             │
+  // └──────────────────────────────────────────────────────┘
+  output: "standalone",
 };
 
 module.exports = nextConfig;

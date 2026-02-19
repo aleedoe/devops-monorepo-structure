@@ -21,6 +21,8 @@ This project exists to **remove confusion** about:
 5. [Source Code Walkthrough](#5-source-code-walkthrough)
 6. [Understanding node_modules & Symlinks](#6-understanding-node_modules--symlinks)
 7. [Understanding Deployment Behavior](#7-understanding-deployment-behavior)
+8. [Docker Configuration & Running Locally](#8-docker-configuration--running-locally)
+9. [CI/CD Pipeline (GitHub Actions)](#9-cicd-pipeline-github-actions)
 
 ---
 
@@ -256,10 +258,12 @@ After completing all steps, your project looks like this:
 devops-monorepo-structure/
 ├── 📄 .gitignore
 ├── 📄 .npmrc                          # PNPM configuration
+├── 📄 .dockerignore                   # Files excluded from Docker context
 ├── 📄 package.json                    # Root — scripts + devDeps only
 ├── 📄 pnpm-workspace.yaml            # Defines workspace packages
 ├── 📄 turbo.json                      # Turborepo task pipeline
 ├── 📄 tsconfig.json                   # Base TypeScript config
+├── 📄 docker-compose.yml             # Orchestrates nginx + web + api
 ├── 📄 README.md
 │
 ├── 📦 node_modules/                   # ← ALL deps hoisted here
@@ -271,16 +275,29 @@ devops-monorepo-structure/
 │   ├── zod/
 │   └── ... (every dependency)
 │
+├── 📁 .github/
+│   └── 📁 workflows/
+│       └── 📄 deploy.yml              # CI/CD: Lint → Build → Deploy
+│
+├── 📁 nginx/                          # Reverse proxy configuration
+│   ├── 📄 Dockerfile                  # nginx:alpine with custom config
+│   └── 📄 nginx.conf                  # Routes /api/* and /* traffic
+│
+├── 📁 scripts/
+│   └── 📄 deploy.sh                   # Standalone VPS deploy script
+│
 ├── 📁 apps/
 │   ├── 📁 api/                        # Express API Server
+│   │   ├── 📄 Dockerfile              # Multi-stage build (turbo prune)
 │   │   ├── 📄 package.json
 │   │   ├── 📄 tsconfig.json
 │   │   └── 📁 src/
 │   │       └── 📄 index.ts            # POST /users endpoint
 │   │
 │   └── 📁 web/                        # Next.js Web App
+│       ├── 📄 Dockerfile              # Multi-stage build (turbo prune)
 │       ├── 📄 package.json
-│       ├── 📄 next.config.js          # transpilePackages config
+│       ├── 📄 next.config.js          # transpilePackages + standalone
 │       ├── 📄 tsconfig.json
 │       └── 📁 src/
 │           └── 📁 app/
@@ -645,7 +662,211 @@ Vercel will install all dependencies, build validators first (respecting Turbore
 
 ---
 
+## 8. Docker Configuration & Running Locally
+
+The monorepo is fully containerized with **Docker Compose**. A single command brings up the entire stack: an **Nginx reverse proxy**, the **Next.js frontend**, and the **Express API** — all on an isolated internal network.
+
+### Starting the Stack
+
+```bash
+# Build and start everything (first run)
+docker compose up --build
+
+# Or run in detached mode (background)
+docker compose up --build -d
+```
+
+That's it. Visit:
+
+- 🌐 **Frontend:** `http://localhost/`
+- 🔥 **API:** `http://localhost/api/`
+
+> **🔑 Key insight:** You never access apps by their individual ports (3000, 3001) in production. All traffic goes through Nginx on port 80, which routes it internally.
+
+### Network Architecture
+
+```mermaid
+graph TB
+    CLIENT["🌍 Browser / Client"] -->|":80"| NGINX
+
+    subgraph HOST["🖥️ Host Machine"]
+        subgraph DOCKER["🐳 Docker — app-network (isolated bridge)"]
+            NGINX["📡 Nginx<br/><i>Reverse Proxy</i><br/>Port 80 (exposed)"]
+            WEB["🌐 Next.js<br/><i>apps/web</i><br/>Port 3000 (internal only)"]
+            API["🔥 Express<br/><i>apps/api</i><br/>Port 3001 (internal only)"]
+        end
+    end
+
+    NGINX -->|"/* → web:3000"| WEB
+    NGINX -->|"/api/* → api:3001<br/>(strips /api prefix)"| API
+
+    style CLIENT fill:#64748b,stroke:#475569,color:#fff
+    style NGINX fill:#22c55e,stroke:#15803d,color:#fff
+    style WEB fill:#3b82f6,stroke:#1e40af,color:#fff
+    style API fill:#f97316,stroke:#c2410c,color:#fff
+    style DOCKER fill:#0f172a,stroke:#334155,color:#e2e8f0
+    style HOST fill:#1e293b,stroke:#334155,color:#e2e8f0
+```
+
+| Property                     | Nginx            | Next.js (web)     | Express (api)     |
+| ---------------------------- | ---------------- | ----------------- | ----------------- |
+| **Exposed to host?**         | ✅ Yes (port 80) | ❌ No             | ❌ No             |
+| **Accessible from browser?** | ✅ Directly      | 🔒 Only via Nginx | 🔒 Only via Nginx |
+| **Internal port**            | 80               | 3000              | 3001              |
+| **Health check**             | `/nginx-health`  | `wget :3000/`     | `wget :3001/`     |
+
+### How the Multi-Stage Docker Build Works
+
+Building a monorepo app is tricky — you can't just `COPY . .` because that includes `apps/api` source code inside the `apps/web` image. The solution: **`turbo prune`**.
+
+```mermaid
+flowchart TD
+    subgraph FULL["📂 Full Monorepo (~500MB)"]
+        F_WEB["apps/web/"]
+        F_API["apps/api/"]
+        F_VAL["packages/validators/"]
+        F_LOCK["pnpm-lock.yaml"]
+        F_NODE["node_modules/"]
+    end
+
+    PRUNE["⚡ turbo prune @repo/web --docker"]
+
+    subgraph PRUNED["✂️ Pruned Output (minimal)"]
+        P_JSON["out/json/<br/><i>package.json files +<br/>pruned lockfile only</i>"]
+        P_FULL["out/full/<br/><i>Only apps/web/ +<br/>packages/validators/<br/>source code</i>"]
+    end
+
+    FULL --> PRUNE --> PRUNED
+
+    style FULL fill:#1e293b,stroke:#334155,color:#e2e8f0
+    style PRUNED fill:#14532d,stroke:#166534,color:#e2e8f0
+    style PRUNE fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style F_WEB fill:#3b82f6,stroke:#1e40af,color:#fff
+    style F_API fill:#ef4444,stroke:#b91c1c,color:#fff
+    style F_VAL fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style F_LOCK fill:#64748b,stroke:#475569,color:#fff
+    style F_NODE fill:#64748b,stroke:#475569,color:#fff
+    style P_JSON fill:#22c55e,stroke:#15803d,color:#fff
+    style P_FULL fill:#22c55e,stroke:#15803d,color:#fff
+```
+
+> **Notice:** `apps/api/` is **excluded** from the pruned output when building the `web` image. Each app only gets what it needs.
+
+Each Dockerfile has **4 stages**:
+
+| Stage            | What it does                                                        | Why                                                                    |
+| ---------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **1. Pruner**    | Runs `turbo prune @repo/web --docker`                               | Extracts only the target app + its shared dependencies                 |
+| **2. Installer** | Copies pruned `package.json` files + lockfile, runs `pnpm install`  | Dependency layer is Docker-cached — only re-runs when lockfile changes |
+| **3. Builder**   | Copies pruned source code, runs `pnpm turbo run build`              | Compiles TypeScript and bundles the application                        |
+| **4. Runner**    | Copies only the compiled output into a clean `node:22-alpine` image | Final image is minimal (~50MB) and runs as a non-root user             |
+
+**Why this matters:**
+
+- Changing code in `apps/api` does **NOT** invalidate the Docker cache for `apps/web`
+- The final images don't contain source code, dev dependencies, or other apps
+- Each image runs as a non-root user (`nextjs` / `expressjs`) for security
+
+### What Nginx Does
+
+The `nginx/nginx.conf` reverse proxy handles:
+
+| Feature                  | Details                                                                            |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| **Routing**              | `/api/*` → Express (strips the `/api` prefix), `/*` → Next.js                      |
+| **Gzip compression**     | Compresses text, JSON, CSS, JS, SVG responses                                      |
+| **Static asset caching** | `/_next/static/*` cached for 1 year (content-hashed filenames)                     |
+| **HTML caching**         | `no-cache` — always serves fresh pages                                             |
+| **Security headers**     | `X-Frame-Options`, `X-Content-Type-Options`, `X-XSS-Protection`, `Referrer-Policy` |
+| **Rate limiting**        | 10 requests/second per IP on `/api/*` endpoints (burst up to 20)                   |
+
+---
+
+## 9. CI/CD Pipeline (GitHub Actions)
+
+The project includes a fully automated pipeline that runs on every push to `main` and every pull request.
+
+### What Happens When
+
+```mermaid
+flowchart TD
+    subgraph TRIGGER["🔔 Trigger"]
+        PR["Pull Request to main"]
+        PUSH["Push to main"]
+    end
+
+    LINT["🔍 Job 1: Lint & Type Check<br/><br/><code>pnpm turbo run lint</code><br/><code>pnpm turbo run typecheck</code><br/><br/>Runs across ALL workspaces"]
+
+    BUILD["🐳 Job 2: Build & Push<br/><br/>Build Docker images<br/>Tag with short SHA + latest<br/>Push to Docker Hub"]
+
+    DEPLOY["🚀 Job 3: Deploy<br/><br/>SCP docker-compose.yml to VPS<br/>SSH → docker compose up -d<br/>Verify health checks"]
+
+    PR --> LINT
+    PUSH --> LINT --> BUILD --> DEPLOY
+
+    style PR fill:#8b5cf6,stroke:#6d28d9,color:#fff
+    style PUSH fill:#22c55e,stroke:#15803d,color:#fff
+    style LINT fill:#3b82f6,stroke:#1e40af,color:#fff
+    style BUILD fill:#f97316,stroke:#c2410c,color:#fff
+    style DEPLOY fill:#ef4444,stroke:#b91c1c,color:#fff
+    style TRIGGER fill:#1e293b,stroke:#334155,color:#e2e8f0
+```
+
+| Event            | Job 1: Lint & Typecheck | Job 2: Build & Push          | Job 3: Deploy                |
+| ---------------- | ----------------------- | ---------------------------- | ---------------------------- |
+| **Pull Request** | ✅ Runs                 | ❌ Skipped                   | ❌ Skipped                   |
+| **Push to main** | ✅ Runs                 | ✅ Runs (after Job 1 passes) | ✅ Runs (after Job 2 passes) |
+
+**Why?** Pull requests only need code quality checks. Building and deploying should only happen when code is actually merged into `main`.
+
+### Image Tagging Strategy
+
+Every build produces Docker images tagged with:
+
+- **Short SHA** (e.g., `abc1234`) — traceable to the exact commit
+- **`latest`** — always points to the most recent build
+
+```
+yourusername/monorepo-web:abc1234
+yourusername/monorepo-web:latest
+yourusername/monorepo-api:abc1234
+yourusername/monorepo-api:latest
+```
+
+### Required GitHub Secrets
+
+Configure these in your GitHub repository settings under **Settings → Secrets and variables → Actions**:
+
+| Secret               | Description                  | Example                        |
+| -------------------- | ---------------------------- | ------------------------------ |
+| `DOCKERHUB_USERNAME` | Docker Hub username          | `yourusername`                 |
+| `DOCKERHUB_TOKEN`    | Docker Hub access token      | _(generate at hub.docker.com)_ |
+| `VPS_HOST`           | VPS IP address or hostname   | `203.0.113.10`                 |
+| `VPS_USERNAME`       | SSH user on the VPS          | `deploy`                       |
+| `VPS_SSH_KEY`        | Full private SSH key content | _(paste entire key)_           |
+| `VPS_PORT`           | SSH port                     | `22`                           |
+
+### Deployment Flow
+
+Once images are pushed to Docker Hub, the pipeline:
+
+1. **Copies** `docker-compose.yml` to the VPS via SCP
+2. **SSHs** into the server and pulls the new images
+3. Runs **`docker compose up -d`** — Docker replaces the old containers with the new ones
+4. **Verifies** health checks pass
+5. **Prunes** old dangling images to save disk space
+
+> **💡 Tip:** The `scripts/deploy.sh` script can also be run manually on any server for the same effect:
+>
+> ```bash
+> ./scripts/deploy.sh yourusername abc1234
+> ```
+
+---
+
 ## Quick Reference
+
+### Development Commands
 
 ```bash
 # Install all dependencies (always from root!)
@@ -665,6 +886,34 @@ pnpm add axios --filter=@repo/api
 
 # Add a shared dev dependency to root
 pnpm add -D prettier -w
+```
+
+### Docker Commands
+
+```bash
+# Build and start the full stack (nginx + web + api)
+docker compose up --build
+
+# Start in detached mode (background)
+docker compose up --build -d
+
+# Stop all containers
+docker compose down
+
+# View logs for all services
+docker compose logs -f
+
+# View logs for a specific service
+docker compose logs -f api
+
+# Rebuild without Docker cache (nuclear option)
+docker compose build --no-cache
+
+# Check container health status
+docker compose ps
+
+# Restart a single service
+docker compose restart web
 ```
 
 ---

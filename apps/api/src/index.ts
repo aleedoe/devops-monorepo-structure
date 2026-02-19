@@ -2,7 +2,7 @@ import express from "express";
 import { userSchema } from "@repo/validators";
 
 const app = express();
-const PORT = 3001;
+const PORT = Number(process.env.PORT) || 3001;
 
 // Middleware
 app.use(express.json());

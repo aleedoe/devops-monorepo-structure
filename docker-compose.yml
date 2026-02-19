@@ -1,0 +1,109 @@
+# ============================================================================
+# DOCKER COMPOSE — MONOREPO ORCHESTRATION
+# ============================================================================
+# Architecture:
+#   [Internet] → [:80] nginx → (app-network) → web:3000
+#                                             → api:3001
+#
+# Only nginx is exposed to the host. web and api are internal only.
+# ============================================================================
+
+services:
+  # ── Nginx Reverse Proxy ──────────────────────────────────────────────────
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    image: ${DOCKERHUB_USERNAME:-local}/monorepo-nginx:${IMAGE_TAG:-latest}
+    container_name: monorepo-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      # Uncomment when you add SSL certificates:
+      # - "443:443"
+    networks:
+      - app-network
+    depends_on:
+      web:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/nginx-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 128M
+        reservations:
+          cpus: "0.10"
+          memory: 32M
+
+  # ── Next.js Frontend ─────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    image: ${DOCKERHUB_USERNAME:-local}/monorepo-web:${IMAGE_TAG:-latest}
+    container_name: monorepo-web
+    restart: unless-stopped
+    # No ports exposed to host — only accessible via nginx on internal network
+    networks:
+      - app-network
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+
+  # ── Express API Backend ──────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    image: ${DOCKERHUB_USERNAME:-local}/monorepo-api:${IMAGE_TAG:-latest}
+    container_name: monorepo-api
+    restart: unless-stopped
+    # No ports exposed to host — only accessible via nginx on internal network
+    networks:
+      - app-network
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 256M
+        reservations:
+          cpus: "0.25"
+          memory: 64M
+
+# ── Networks ─────────────────────────────────────────────────────────────────
+# Isolated bridge network — containers communicate by service name (web, api)
+# but are NOT accessible from the host network directly.
+networks:
+  app-network:
+    driver: bridge

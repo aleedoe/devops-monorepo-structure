@@ -1,0 +1,190 @@
+# ============================================================================
+# CI/CD PIPELINE — Build, Push, Deploy
+# ============================================================================
+# Triggered on push to main branch.
+#
+# Jobs:
+#   1. lint-and-typecheck — Validate code quality across all workspaces
+#   2. build-and-push     — Build Docker images and push to Docker Hub
+#   3. deploy             — Zero-downtime deploy to VPS via SSH
+#
+# Required Secrets:
+#   DOCKERHUB_USERNAME, DOCKERHUB_TOKEN, VPS_HOST, VPS_USERNAME,
+#   VPS_SSH_KEY, VPS_PORT
+# ============================================================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  WEB_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/monorepo-web
+  API_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/monorepo-api
+  NGINX_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/monorepo-nginx
+
+jobs:
+  # ── Job 1: Lint & Type Check ─────────────────────────────────────────────
+  lint-and-typecheck:
+    name: 🔍 Lint & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📦 Setup PNPM
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: 📥 Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: 🔨 Build shared packages
+        run: pnpm turbo run build --filter=@repo/validators
+
+      - name: 🔍 Run linting
+        run: pnpm turbo run lint
+
+      - name: 🔎 Run type checking
+        run: pnpm turbo run typecheck
+
+  # ── Job 2: Build & Push Docker Images ────────────────────────────────────
+  build-and-push:
+    name: 🐳 Build & Push Images
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+    # Only build/push on main branch (not on PRs)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🏷️ Generate short SHA tag
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ── Build & Push: Next.js (web) ──────────────────────────────────
+      - name: 🌐 Build & Push Web Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/web/Dockerfile
+          push: true
+          tags: |
+            ${{ env.WEB_IMAGE }}:${{ steps.vars.outputs.sha_short }}
+            ${{ env.WEB_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Build & Push: Express (api) ──────────────────────────────────
+      - name: ⚡ Build & Push API Image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/api/Dockerfile
+          push: true
+          tags: |
+            ${{ env.API_IMAGE }}:${{ steps.vars.outputs.sha_short }}
+            ${{ env.API_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Build & Push: Nginx ──────────────────────────────────────────
+      - name: 🔀 Build & Push Nginx Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./nginx
+          file: ./nginx/Dockerfile
+          push: true
+          tags: |
+            ${{ env.NGINX_IMAGE }}:${{ steps.vars.outputs.sha_short }}
+            ${{ env.NGINX_IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Job 3: Deploy to VPS ─────────────────────────────────────────────────
+  deploy:
+    name: 🚀 Deploy to VPS
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🏷️ Generate short SHA tag
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: 📤 Copy docker-compose.yml to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          source: "docker-compose.yml"
+          target: "~/monorepo-app"
+
+      - name: 🚀 Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          envs: DOCKERHUB_USERNAME,IMAGE_TAG
+          script_stop: true
+          script: |
+            cd ~/monorepo-app
+
+            # Pull the latest images
+            echo "📥 Pulling images with tag: ${IMAGE_TAG}..."
+            docker pull ${DOCKERHUB_USERNAME}/monorepo-web:${IMAGE_TAG}
+            docker pull ${DOCKERHUB_USERNAME}/monorepo-api:${IMAGE_TAG}
+            docker pull ${DOCKERHUB_USERNAME}/monorepo-nginx:${IMAGE_TAG}
+
+            # Deploy with zero-downtime rolling update
+            echo "🚀 Deploying with tag: ${IMAGE_TAG}..."
+            export DOCKERHUB_USERNAME=${DOCKERHUB_USERNAME}
+            export IMAGE_TAG=${IMAGE_TAG}
+            docker compose up -d --no-build --remove-orphans
+
+            # Wait for health checks
+            echo "⏳ Waiting for containers to be healthy..."
+            sleep 15
+
+            # Verify deployment
+            echo "✅ Verifying deployment..."
+            docker compose ps
+
+            # Clean up old images
+            echo "🧹 Cleaning up dangling images..."
+            docker image prune -f
+
+            echo "🎉 Deployment complete! Tag: ${IMAGE_TAG}"
